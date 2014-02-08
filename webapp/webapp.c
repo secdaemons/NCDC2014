@@ -24,6 +24,7 @@
 #include <linux/kernel.h> 
 #include <mysql/mysql.h>
 #include <time.h>
+#include <cgi.h>
 #include "fcgi_stdio.h"
 #include "raphters.h"
 #include "webapp.h"
@@ -80,7 +81,8 @@ START_HANDLER (login_action_handler, POST, "/login", res, 0, matches) {
 
 	if(authenticate(username,password)){
 		char username_cookie[1024];
-		sprintf(username_cookie, "Username=%s; path=/; max-age=604800;", username);
+		
+		sprintf(username_cookie, "Username=%s; path=/; max-age=604800;",get_field_for_username(username,"Session"));
 		response_add_header(res, "Set-Cookie", username_cookie);
 		response_add_header(res, "Set-Cookie", "Authenticated=yes; path=/; max-age=604800;");
 		response_add_header(res, "Location", "/webapp/timesheet");
@@ -103,14 +105,25 @@ START_HANDLER (logout_action_handler, GET, "/logout", res, 0, matches) {
 
 // add user page
 START_HANDLER (create_user_page_handler, GET, "/user/new", res, 0, matches) {
+	
+char *username = get_session_username();	
+if(userExists(username) && is_authenticated() && is_admin(username)){
+
 	response_add_header(res, "content-type", "text/html");
 	write_page_template_header(res);
 	write_template(res, "./templates/new_user.html.template");
 	write_page_template_footer(res);
+}
+
+else {
+		response_add_header(res, "Location", "/webapp/login"); // redirect to login page
+	}
+
 } END_HANDLER
 
 // add user action
 START_HANDLER (create_user_action_handler, POST, "/user/create", res, 0, matches) {
+
 	char* post_data = get_post_string();
 
 	char* username = get_param(post_data, "username");
@@ -164,8 +177,10 @@ START_HANDLER (create_user_action_handler, POST, "/user/create", res, 0, matches
 // TODO: should we do some XSS protection????
 // https://www.youtube.com/watch?v=L5l9lSnNMxg
 START_HANDLER (timesheet_page_handler, GET, "/timesheet", res, 0, matches) {
-	char *username = get_session_username();
-	if(username != NULL && is_authenticated()){
+
+char *username = get_session_username();	
+if(userExists(username) && is_authenticated()){
+
 		response_add_header(res, "content-type", "text/html");
 		write_page_template_header(res);
 		write_logout_link(res, username);
@@ -221,23 +236,35 @@ START_HANDLER (timesheet_page_handler, GET, "/timesheet", res, 0, matches) {
 		write_template(res, "./templates/timesheet.js.template");
 
 		write_page_template_footer(res);
-	} else {
+	}else {
 		response_add_header(res, "Location", "/webapp/login"); // redirect to login page
 	}
 } END_HANDLER
 
 // timesheet content
 START_HANDLER (timesheet_content_handler, GET, "/entries.json", res, 0, matches) {
+
+char *username = get_session_username();	
+if(userExists(username) && is_authenticated()){
+
 	response_add_header(res, "content-type", "text/html");
 	char* query_string = get_query_string();
 	char* username = get_param(query_string, "user");
 	char* start_date = get_param(query_string, "start");
 	char* end_date = get_param(query_string, "end");
 	render_entries_json(res, username, start_date, end_date);	
+}
+else {
+		response_add_header(res, "Location", "/webapp/login"); // redirect to login page
+	}
 } END_HANDLER
 
 // timesheet approve action
 START_HANDLER (timesheet_approve_handler, GET, "/entry/approve", res, 0, matches) {
+
+char *username = get_session_username();	
+if(userExists(username) && is_authenticated() && is_admin(username)){
+
 	response_add_header(res, "content-type", "text/html");
 	char* query_string = get_query_string();
 	char* day = get_param(query_string, "day");
@@ -254,14 +281,27 @@ START_HANDLER (timesheet_approve_handler, GET, "/entry/approve", res, 0, matches
 		response_write(res, "Error: Could not approve timesheet entry.");	
 	}
 	write_page_template_footer(res);	
+}
+
+else {
+		response_add_header(res, "Location", "/webapp/login"); // redirect to login page
+	}
+
 } END_HANDLER
 
 // new timesheet content
 START_HANDLER (entry_page_handler, GET, "/entry/new", res, 0, matches) {
+
+char *username = get_session_username();	
+if(userExists(username) && is_authenticated()){
+
 	response_add_header(res, "content-type", "text/html");
 	write_page_template_header(res);	
 	write_template(res, "./templates/entry.html.template");
 	write_page_template_footer(res);
+}else {
+		response_add_header(res, "Location", "/webapp/login"); // redirect to login page
+	}
 } END_HANDLER
 
 // timesheet content creator
@@ -286,14 +326,25 @@ START_HANDLER (entry_action_handler, POST, "/entry/create", res, 0, matches) {
 
 // admin page
 START_HANDLER (admin_page_handler, GET, "/admin", res, 0, matches) {
+
+char *username = get_session_username();	
+if(userExists(username) && is_authenticated() && is_admin(username)){
+
 	response_add_header(res, "content-type", "text/html");
 	write_page_template_header(res);
 	write_template(res,"./templates/admin.html.template");
 	response_write(res, "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" class=\"table table-striped table-bordered\">");
-	response_write(res, "<tr><th>Username</th><th>Password</th><th>First Name</th><th>Last Name</th><th>Social Security Number</th><th>Is Admin</th></tr>");
+	response_write(res, "<tr><th>First Name</th><th>Last Name</th><th>Social Security Number</th></tr>");
 	dump_tables(res);
 	response_write(res, "</table>");
 	write_page_template_footer(res);
+	}
+	else 
+	{
+	response_add_header(res, "Location", "/webapp/login"); 
+	// redirect to login page
+	}
+
 } END_HANDLER
 
 // javascript vars
@@ -347,7 +398,7 @@ START_HANDLER (default_handler, GET, "", res, 0, matches) {
 } END_HANDLER
 
 void on_crash() {
-	dump_tables(NULL);
+
 }
 
 int main() {

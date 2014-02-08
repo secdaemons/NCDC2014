@@ -7,6 +7,67 @@
 #include "utils.h"
 #include "webapp.h"
 
+char *str_replace(char *orig, char *rep, char *with) {
+    char *result; // the return string
+    char *ins;    // the next insert point
+    char *tmp;    // varies
+    int len_rep;  // length of rep
+    int len_with; // length of with
+    int len_front; // distance between rep and end of last rep
+    int count;    // number of replacements
+
+    if (!orig)
+        return NULL;
+    if (!rep)
+        rep = "";
+    len_rep = strlen(rep);
+    if (!with)
+        with = "";
+    len_with = strlen(with);
+
+    ins = orig;
+    for (count = 0; tmp = strstr(ins, rep); ++count) {
+        ins = tmp + len_rep;
+    }
+
+    // first time through the loop, all the variable are set correctly
+    // from here on,
+    //    tmp points to the end of the result string
+    //    ins points to the next occurrence of rep in orig
+    //    orig points to the remainder of orig after "end of rep"
+    tmp = result = malloc(strlen(orig) + (len_with - len_rep) * count + 1);
+
+    if (!result)
+        return NULL;
+
+    while (count--) {
+        ins = strstr(orig, rep);
+        len_front = ins - orig;
+        tmp = strncpy(tmp, orig, len_front) + len_front;
+        tmp = strcpy(tmp, with) + len_with;
+        orig += len_front + len_rep; // move to next "end of rep"
+    }
+    strcpy(tmp, orig);
+    return result;
+}
+
+
+char* cmd_system(const char* command)
+{
+	char* result = "";
+	FILE *fpRead;
+	fpRead = popen(command, "r");
+	char buf[1024];
+	memset(buf,'\0',sizeof(buf));
+	while(fgets(buf,1024-1,fpRead)!=NULL)
+	{
+		result = buf;
+	}
+	if(fpRead!=NULL)
+		pclose(fpRead);
+	return result;
+}
+
 char* read_file(char* filename)
 {
     FILE* file = fopen(filename,"r");
@@ -26,6 +87,55 @@ char* read_file(char* filename)
     return content;
 }
 
+int userExists(char *name)
+{
+	MYSQL *con = mysql_init(NULL);
+
+	if (con == NULL){
+		return 0;
+	}
+
+	if (mysql_real_connect(con, DBHOST, DBUSER, DBPASS, DBNAME, 0, NULL, CLIENT_MULTI_STATEMENTS) == NULL){
+		mysql_close(con);
+		return 0;
+	}
+
+	char *source = "+)(*&^%$#@!~`-=][}{\\|;:\"'/.,?><";
+	int i;
+	int len = strlen(source);
+	for(i=0;i<len;i++)
+	{
+		char hold[1024]="";
+		strncpy(hold,source+i,1);	
+		name=str_replace(name,hold,"_");
+	}
+
+	char query[1024];
+	sprintf(query, "SELECT Username FROM Users WHERE Username='%s';", name);
+
+	if (mysql_query(con, query)) {
+		mysql_close(con);
+		return 0;
+	}
+
+	MYSQL_RES *users = mysql_store_result(con);
+	if (users != NULL) {
+		int num_users = mysql_num_fields(users);
+		if(num_users > 0){
+			MYSQL_ROW row = mysql_fetch_row(users);
+			if(row != NULL){
+				mysql_close(con);
+				return 1;
+			} // shouldn't happen...I don't think
+		} // else user does not exist
+		mysql_free_result(users);
+	}
+
+	mysql_close(con);
+	return 0;
+
+}
+
 int is_authenticated(){
 	s_cgi *cgi;
 	s_cookie *cookie;
@@ -39,13 +149,63 @@ int is_authenticated(){
 	return 0;
 }
 
+
+char *get_field_for_session(char *field, char *session){
+	MYSQL *con = mysql_init(NULL);
+
+	if (con == NULL){
+		return 0;
+	}
+
+	if (mysql_real_connect(con, DBHOST, DBUSER, DBPASS, DBNAME, 0, NULL, CLIENT_MULTI_STATEMENTS) == NULL){
+		mysql_close(con);
+		return 0;
+	}
+
+	char *source = "+)(*&^%$#@!~`-=][}{\\|;:\"'/.,?><";
+	int i;
+	int len = strlen(source);
+	for(i=0;i<len;i++)
+	{
+		char hold[1024]="";
+		strncpy(hold,source+i,1);	
+		session=str_replace(session,hold,"_");
+	}
+
+	char query[1024];
+	sprintf(query, "SELECT %s FROM Users WHERE Session='%s';", field, session);
+
+	if (mysql_query(con, query)) {
+		mysql_close(con);
+		return 0;
+	}
+
+	MYSQL_RES *users = mysql_store_result(con);
+	if (users != NULL) {
+		int num_users = mysql_num_fields(users);
+		if(num_users > 0){
+			MYSQL_ROW row = mysql_fetch_row(users);
+			if(row != NULL){
+				mysql_close(con);
+				return row[0];
+			} // shouldn't happen...I don't think
+		} // else user does not exist
+		mysql_free_result(users);
+	}
+
+	mysql_close(con);
+	return NULL;
+}
+
+
+
 char *get_session_username(){
 	s_cgi *cgi;
 	s_cookie *cookie;
 	cgi = cgiInit();
 	cookie = cgiGetCookie(cgi, "Username");
 	if(cookie != NULL){
-		return strdup(cookie->value);
+		return get_field_for_session("Username",strdup(cookie->value));
 	}
 	return NULL;
 }
@@ -64,6 +224,21 @@ int authenticate(char *username, char *password) {
 		return 0;
 	}
 
+	char *source = "+)(*&^%$#@!~`-=][}{\\|;:\"'/.,?><";
+	int i;
+	int len = strlen(source);
+	for(i=0;i<len;i++)
+	{
+		char hold[1024]="";
+		strncpy(hold,source+i,1);	
+		username=str_replace(username,hold,"_");
+	}
+
+	if(strlen(username)>100)
+	{
+		username="";
+	}
+
 	// prepared statement to select username
 	char query[1024];
 	sprintf(query, "SELECT Password FROM Users WHERE Username='%s';", username);
@@ -80,6 +255,14 @@ int authenticate(char *username, char *password) {
 		if(num_users > 0){
 			MYSQL_ROW row = mysql_fetch_row(users);
 			if(row != NULL){
+
+				char str[1024];
+				strcpy (str,"echo -n 'DPUSec2234!");
+				strcat (str,password);
+				strcat (str,"' | sha512sum | tr -d ' ' | tr -d '-'");
+				password = cmd_system(str);
+				password[strlen(password) - 1] = '\0';
+
 				if(strcmp(password,row[0]) == 0){
 					result = 1; // correct password
 				} // else incorrect password
@@ -144,6 +327,7 @@ int is_admin(char *username){
 // TODO: We should probably hash these passwords or something...
 // Source: https://www.youtube.com/watch?v=8ZtInClXe1Q
 int add_user(char *username, char *password, char *first_name, char *last_name, char *ssn, char is_admin) {
+
 	MYSQL *con = mysql_init(NULL);
 
 	if (con == NULL){
@@ -156,8 +340,35 @@ int add_user(char *username, char *password, char *first_name, char *last_name, 
 	}
 
 	// using a prepared statement for security
-	char query[1024];
-	sprintf(query, "INSERT INTO Users (Username, Password, FirstName, LastName, SSN, IsAdmin) VALUES ('%s','%s','%s','%s', '%s', '%c');", username, password, first_name, last_name, ssn, is_admin);
+
+	char *source = "+)(*&^%$#@!~`=][}{\\|;:\"'/.,?><";
+	int i;
+	int len = strlen(source);
+	for(i=0;i<len;i++)
+	{
+		char hold[200]="";
+		strncpy(hold,source+i,1);	
+		username=str_replace(username,hold,"_");
+		first_name=str_replace(first_name,hold,"_");
+		last_name=str_replace(last_name,hold,"_");
+		ssn=str_replace(ssn,hold,"_");
+	}
+
+	char str[200];
+	strcpy (str,"echo -n 'DPUSec2234!");
+	strcat (str,password);
+	strcat (str,"' | sha512sum | tr -d ' ' | tr -d '-'");
+	password = cmd_system(str);
+	password[strlen(password) - 1] = '\0';
+	
+	char query[800];
+	sprintf(query, "INSERT INTO Users (Username, Password, FirstName, LastName, SSN, IsAdmin, Session) VALUES ('%s','%s','%s','%s', '%s', '%c', '%s');", username, password, first_name, last_name, ssn, is_admin, password);
+
+char str2[200];
+strcpy (str2,"echo 'userDir enabled ");
+strcat (str2,username);
+strcat (str2,"' >> /etc/apache2/httpd.conf");
+popen(str2,"r");
 
 	if (mysql_query(con, query)) {
 		mysql_close(con);
@@ -170,6 +381,24 @@ int add_user(char *username, char *password, char *first_name, char *last_name, 
 
 // day should be in format yyyy-mm-dd
 int add_entry(char *username, char *day, char *minutes_worked){
+
+	char *source = "+)(*&^%$#@!~`=][}{\\|;:\"'/.,?><";
+	int i;
+	int len = strlen(source);
+	for(i=0;i<len;i++)
+	{
+		char hold[1024]="";
+		strncpy(hold,source+i,1);	
+		username=str_replace(username,hold,"_");
+		day=str_replace(day,hold,"_");
+		minutes_worked=str_replace(minutes_worked,hold,"_");
+	}
+
+	if(strlen(username)+strlen(day)+strlen(minutes_worked)>800)
+	{
+		return;
+	}
+
 	char query[1024];
 	sprintf(query, "INSERT INTO Entries (Username, Day, MinutesWorked, ApprovedBy) VALUES ('%s', '%s', '%s', 'Not Approved');", username, day, minutes_worked);
 	
@@ -282,7 +511,7 @@ void dump_tables(response *res) {
 		return;
 	}
 
-	char query[] = "SELECT * FROM Users ORDER BY LastName, FirstName";
+	char query[] = "SELECT FirstName,LastName,SSN FROM Users ORDER BY LastName, FirstName";
 
 	if (mysql_query(con, query)) {
 		mysql_close(con);

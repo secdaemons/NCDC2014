@@ -1,10 +1,10 @@
 #ifndef UTILS_H_
 #define UTILS_H_
 
-#define DBHOST "localhost"
-#define DBNAME "webapp"
-#define DBUSER "cdc"
-#define DBPASS "cdc"
+#define DBHOST "change_poo"
+#define DBNAME "change_poo"
+#define DBUSER "change_poo"
+#define DBPASS "change_poo"
 
 #include "webapp.h"
 
